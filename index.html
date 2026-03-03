@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>NOCTIS MIDI</title>
+<script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.27/build/Midi.js"></script>
+<style>
+body {
+    background-color: #0f0f0f;
+    color: #eaeaea;
+    font-family: Arial, sans-serif;
+    margin: 0;
+}
+.container {
+    max-width: 1000px;
+    margin: 60px auto;
+    padding: 40px;
+}
+h2 {
+    text-align: center;
+    font-weight: 600;
+    letter-spacing: 2px;
+}
+select, input {
+    margin: 6px 0;
+    padding: 6px;
+    font-size: 14px;
+    background: #1c1c1c;
+    color: #fff;
+    border: 1px solid #333;
+}
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px;
+}
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.control-group label {
+    margin: 0;
+    font-size: 13px;
+    color: #9fb3c8;
+}
+.output-wrapper {
+    position: relative;
+    margin-top: 10px;
+}
+.copyBtn {
+    position: absolute;
+    top: -28px;
+    right: 0;
+    font-size: 11px;
+    padding: 4px 10px;
+    background: #0e1a2b;
+    color: #4da3ff;
+    border: 1px solid #1f3b63;
+    cursor: pointer;
+}
+.copyBtn:hover {
+    background: #132742;
+}
+#outputNotes, #outputRhythm {
+    white-space: pre;
+    font-size: 14px;
+    border: 1px solid #333;
+    padding: 15px;
+    height: 160px;
+    overflow: auto;
+    background: #151515;
+    margin-bottom: 15px;
+}
+.label {
+    margin-top: 20px;
+    font-weight: bold;
+}
+.rhythm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.rhythm-row input,
+.rhythm-row select {
+    width: auto;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>NOCTIS MIDI</h2>
+
+<input type="file" id="fileInput" accept=".mid,.midi"><br>
+
+<div class="controls">
+
+<div class="control-group">
+    <label>表示形式</label>
+    <select id="mode">
+        <option value="simple" selected>音名のみ (C, D, E)</option>
+        <option value="octave">オクターブ付き (C4, D4)</option>
+        <option value="number">MIDI番号</option>
+    </select>
+</div>
+
+<div class="control-group">
+    <label>出力形式</label>
+    <select id="format">
+        <option value="cells" selected>セル分割（1音=1セル）</option>
+        <option value="horizontal">横並び</option>
+        <option value="vertical">縦並び</option>
+    </select>
+</div>
+
+<div class="control-group">
+    <label>区切り</label>
+    <select id="separator">
+        <option value="" selected>なし</option>
+        <option value=",">カンマ</option>
+        <option value=" ">スペース</option>
+        <option value="\t">タブ</option>
+    </select>
+</div>
+
+</div>
+
+<div class="label">リズム設定</div>
+
+<div class="rhythm-row">
+    <span>拍子：</span>
+    <input type="number" id="timeNum" value="4" min="1" style="width:60px;">
+    <span>/</span>
+    <input type="number" id="timeDen" value="4" min="1" style="width:60px;">
+    <span style="margin-left:20px;">基準音価：</span>
+    <select id="resolution">
+        <option value="4">4分音符</option>
+        <option value="8" selected>8分音符</option>
+        <option value="16">16分音符</option>
+        <option value="32">32分音符</option>
+    </select>
+    <button id="syncBtn" type="button" style="opacity:0.5;">同期</button>
+    <button id="bulkCopyBtn" type="button" style="opacity:0.5; display:none; margin-left:6px;">一括COPY</button>
+</div>
+
+<div class="label">音名出力</div>
+<div class="output-wrapper">
+<div id="outputNotes"></div>
+<button class="copyBtn" onclick="copyNotes()">COPY</button>
+</div>
+
+<div class="label">リズム出力</div>
+<div class="output-wrapper">
+<div id="outputRhythm"></div>
+<button class="copyBtn" onclick="copyRhythm()">COPY</button>
+</div>
+
+</div>
+
+<script>
+
+let extractedNotes = [];
+let midiData = null;
+let syncMode = false;
+
+const noteNames = ["C","C#","D","D#","E","F",
+                   "F#","G","G#","A","A#","B"];
+
+const fileInput = document.getElementById("fileInput");
+
+fileInput.addEventListener("change", async function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    midiData = new Midi(arrayBuffer);
+
+    extractedNotes = [];
+    midiData.tracks.forEach(track => {
+        track.notes.forEach(note => {
+            extractedNotes.push(note);
+        });
+    });
+
+    render();
+});
+
+document.getElementById("syncBtn").addEventListener("click", ()=>{
+    syncMode = !syncMode;
+
+    const syncBtn = document.getElementById("syncBtn");
+    const bulkBtn = document.getElementById("bulkCopyBtn");
+
+    syncBtn.style.opacity = syncMode ? "1" : "0.5";
+    bulkBtn.style.display = syncMode ? "inline-block" : "none";
+
+    render();
+});
+
+document.getElementById("bulkCopyBtn").addEventListener("click", copyAll);
+
+document.querySelectorAll("select,input").forEach(el=>{
+    el.addEventListener("change", render);
+});
+
+function render() {
+    if (!midiData || extractedNotes.length === 0) return;
+
+    renderNotes();
+    renderRhythm();
+}
+
+function renderNotes() {
+
+    const mode = document.getElementById("mode").value;
+    const format = document.getElementById("format").value;
+    const separator = document.getElementById("separator").value;
+    const resolution = parseInt(document.getElementById("resolution").value);
+
+    const ppq = midiData.header.ppq;
+    const baseTicks = ppq * (4 / resolution);
+
+    let maxTick = 0;
+    extractedNotes.forEach(note=>{
+        if (note.ticks > maxTick) maxTick = note.ticks;
+    });
+
+    const totalSteps = Math.ceil(maxTick / baseTicks) + 1;
+    let noteArray = new Array(totalSteps).fill("");
+
+    extractedNotes.forEach(note=>{
+        const index = Math.round(note.ticks / baseTicks);
+
+        if (mode === "number") {
+            noteArray[index] = note.midi;
+        } else {
+            const name = noteNames[note.midi % 12];
+            if (mode === "simple") {
+                noteArray[index] = name;
+            } else {
+                const octave = Math.floor(note.midi / 12) - 1;
+                noteArray[index] = name + octave;
+            }
+        }
+    });
+
+    // 先頭の空白を削除（最初の音まで）
+    const firstNoteIndex = noteArray.findIndex(n => n !== "");
+    if (firstNoteIndex > 0) {
+        noteArray = noteArray.slice(firstNoteIndex);
+    }
+
+    if (!syncMode) {
+        noteArray = noteArray.filter(n => n !== "");
+    }
+
+    const out = document.getElementById("outputNotes");
+
+    if (format === "vertical") {
+        out.textContent = noteArray.join("\n");
+    } else if (format === "cells") {
+        out.textContent = noteArray.join("\t");
+    } else {
+        out.textContent = noteArray.join(separator);
+    }
+}
+
+function renderRhythm() {
+
+    const resolution = parseInt(document.getElementById("resolution").value);
+    const format = document.getElementById("format").value;
+    const separator = document.getElementById("separator").value;
+
+    const ppq = midiData.header.ppq;
+    const baseTicks = ppq * (4 / resolution);
+
+    let maxTick = 0;
+    extractedNotes.forEach(note=>{
+        if (note.ticks > maxTick) maxTick = note.ticks;
+    });
+
+    const totalSteps = Math.ceil(maxTick / baseTicks) + 1;
+    let rhythmArray = new Array(totalSteps).fill(0);
+
+    extractedNotes.forEach(note=>{
+        const index = Math.round(note.ticks / baseTicks);
+        rhythmArray[index] = 1;
+    });
+
+    const firstOne = rhythmArray.indexOf(1);
+    if (firstOne > 0) {
+        rhythmArray = rhythmArray.slice(firstOne);
+    }
+
+    const out = document.getElementById("outputRhythm");
+
+    if (format === "vertical") {
+        out.textContent = rhythmArray.join("\n");
+    } else if (format === "cells") {
+        out.textContent = rhythmArray.join("\t");
+    } else {
+        out.textContent = rhythmArray.join(separator);
+    }
+}
+
+function copyNotes() {
+    const text = document.getElementById("outputNotes").textContent;
+    if (text) navigator.clipboard.writeText(text);
+}
+
+function copyRhythm() {
+    const text = document.getElementById("outputRhythm").textContent;
+    if (text) navigator.clipboard.writeText(text);
+}
+
+function copyAll() {
+    const notes = document.getElementById("outputNotes").textContent;
+    const rhythm = document.getElementById("outputRhythm").textContent;
+    if (!notes || !rhythm) return;
+
+    const combined = notes + "\n" + rhythm;
+    navigator.clipboard.writeText(combined);
+}
+
+</script>
+
+</body>
+</html>
